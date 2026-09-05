@@ -127,7 +127,8 @@ async def generate_soap(request: SOAPRequest):
     try:
         prompt = generate_prompt(len(karte_images), len(memo_images), input_text)
         
-        contents = [types.Part.from_text(prompt)]
+        # ⭐ text= を指定して修正
+        contents = [types.Part.from_text(text=prompt)]
         
         logger.info(f"[{request_id}] Processing {len(karte_images)} karte images...")
         for i, img_b64 in enumerate(karte_images):
