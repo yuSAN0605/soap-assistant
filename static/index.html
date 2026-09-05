@@ -32,12 +32,13 @@
                         画像を選択
                         <input type="file" id="imageInput" accept="image/*" multiple class="hidden">
                     </label>
-                    <!-- カメラ直接起動 -->
-                    <label class="cursor-pointer bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-medium py-2 px-3 rounded-lg text-center transition flex items-center justify-center gap-1.5">
+                    <!-- カメラ直接起動ボタン -->
+                    <button type="button" id="cameraBtn" class="cursor-pointer bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-sm font-medium py-2 px-3 rounded-lg text-center transition flex items-center justify-center gap-1.5">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812-1.22A2 2 0 0118.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                         カメラで撮影
-                        <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
-                    </label>
+                    </button>
+                    <!-- 非表示のカメラ用input（強制撮影属性付き） -->
+                    <input type="file" id="cameraInput" accept="image/*" capture="environment" class="hidden">
                 </div>
             </div>
 
@@ -127,7 +128,6 @@
             });
         }
 
-        // プレビューの再描画と削除機能のバインド
         function updatePreview() {
             const container = document.getElementById('imagePreviewContainer');
             container.innerHTML = '';
@@ -145,7 +145,6 @@
                 img.src = imgData;
                 img.className = 'w-full h-full object-cover rounded-lg border border-slate-200 shadow-sm';
 
-                // 削除ボタン（×マーク）
                 const deleteBtn = document.createElement('button');
                 deleteBtn.innerHTML = '&times;';
                 deleteBtn.className = 'absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow hover:bg-red-600 transition';
@@ -161,7 +160,6 @@
             });
         }
 
-        // 画像追加処理（共通）
         async function handleFiles(files) {
             for (let file of files) {
                 try {
@@ -174,19 +172,21 @@
             updatePreview();
         }
 
-        // ファイル選択イベント
         document.getElementById('imageInput').addEventListener('change', async (e) => {
             await handleFiles(Array.from(e.target.files));
-            e.target.value = ''; // 同じファイルを連続選択できるようにリセット
+            e.target.value = '';
         });
 
-        // カメラ撮影イベント
+        // カメラボタンクリックで、隠し持っている cameraInput を確実にプログラムから発火させる
+        document.getElementById('cameraBtn').addEventListener('click', () => {
+            document.getElementById('cameraInput').click();
+        });
+
         document.getElementById('cameraInput').addEventListener('change', async (e) => {
             await handleFiles(Array.from(e.target.files));
-            e.target.value = ''; // 同じカメラ入力を連続できるようにリセット
+            e.target.value = '';
         });
 
-        // SOAP生成ボタン
         document.getElementById('generateBtn').addEventListener('click', async () => {
             const inputText = document.getElementById('inputText').value;
             if (!inputText && base64Images.length === 0) {
@@ -223,7 +223,6 @@
             }
         });
 
-        // クリップボードコピー
         document.getElementById('copyBtn').addEventListener('click', () => {
             const textToCopy = [
                 `【経過】\n${document.getElementById('resProgress').value}`,
