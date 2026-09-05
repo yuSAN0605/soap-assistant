@@ -121,7 +121,8 @@ async def generate_soap(request: SOAPRequest):
         
         logger.info(f"Calling Gemini API with {len(parts)} parts...")
         
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # gemini-3.5-flash を指定
+        model = genai.GenerativeModel('gemini-3.5-flash')
         response = await asyncio.to_thread(
             model.generate_content,
             parts,
