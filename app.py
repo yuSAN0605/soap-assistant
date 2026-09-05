@@ -9,11 +9,10 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from datetime import datetime
 
-# ロギング（本番用に出力レベル調整）
+# ロギング設定
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -31,7 +30,8 @@ app.add_middleware(
 )
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -55,7 +55,6 @@ def clean_base64(data_str: str) -> str:
     return data_str
 
 def estimate_api_cost(num_images: int) -> str:
-    """API コスト推定（ログ用）"""
     base_tokens = 1000
     image_tokens = num_images * 1000
     total = base_tokens + image_tokens
@@ -78,7 +77,7 @@ async def generate_soap(request: SOAPRequest):
     request_id = datetime.now().strftime("%Y%m%d%H%M%S%f")[:17]
     logger.info(f"[{request_id}] === generate_soap called ===")
     
-    if not client:
+    if not GEMINI_API_KEY:
         logger.error(f"[{request_id}] API key not configured")
         raise HTTPException(status_code=500, detail="API key not configured")
     
@@ -91,18 +90,15 @@ async def generate_soap(request: SOAPRequest):
     if not input_text and not karte_images and not memo_images:
         raise HTTPException(status_code=400, detail="At least one input required")
     
-    # ⭐ Base64 サイズチェック（Render メモリ保護）
     total_size = sum(len(img) for img in karte_images + memo_images)
-    if total_size > 50 * 1024 * 1024:  # 50MB超
-        logger.warning(f"[{request_id}] Total image size exceeds 50MB: {total_size / 1024 / 1024:.1f}MB")
+    if total_size > 50 * 1024 * 1024:
+        logger.warning(f"[{request_id}] Total image size exceeds 50MB")
         raise HTTPException(status_code=413, detail="Images too large (max 50MB total)")
     
     raw_text = ""
     try:
-        # ⭐ プロンプト生成関数を使用
         prompt = generate_prompt(len(karte_images), len(memo_images), input_text)
-        
-        contents = [prompt]
+        parts = [prompt]
         
         logger.info(f"[{request_id}] Processing {len(karte_images)} karte images...")
         for i, img_b64 in enumerate(karte_images):
@@ -110,12 +106,10 @@ async def generate_soap(request: SOAPRequest):
                 cleaned = clean_base64(img_b64)
                 if cleaned:
                     image_bytes = base64.b64decode(cleaned)
-                    contents.append(
-                        types.Part.from_bytes(
-                            data=image_bytes,
-                            mime_type="image/jpeg",
-                        )
-                    )
+                    parts.append({
+                        "mime_type": "image/jpeg",
+                        "data": image_bytes
+                    })
                     logger.debug(f"[{request_id}] karte image {i}: {len(image_bytes) / 1024:.1f}KB")
             except Exception as e:
                 logger.error(f"[{request_id}] karte image {i} failed: {e}")
@@ -127,35 +121,33 @@ async def generate_soap(request: SOAPRequest):
                 cleaned = clean_base64(img_b64)
                 if cleaned:
                     image_bytes = base64.b64decode(cleaned)
-                    contents.append(
-                        types.Part.from_bytes(
-                            data=image_bytes,
-                            mime_type="image/jpeg",
-                        )
-                    )
+                    parts.append({
+                        "mime_type": "image/jpeg",
+                        "data": image_bytes
+                    })
                     logger.debug(f"[{request_id}] memo image {i}: {len(image_bytes) / 1024:.1f}KB")
             except Exception as e:
                 logger.error(f"[{request_id}] memo image {i} failed: {e}")
                 raise HTTPException(status_code=400, detail=f"Image decode failed: {str(e)}")
         
-        logger.info(f"[{request_id}] Calling Gemini API...")
+        logger.info(f"[{request_id}] Calling Gemini API with gemini-1.5-flash...")
         
-        # ⭐ タイムアウト＆リトライ対応
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        
         max_retries = 2
         for attempt in range(max_retries):
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
-                        client.models.generate_content,
-                        model='gemini-1.5-flash',
-                        contents=contents,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            temperature=0.1,
-                            max_output_tokens=4096
-                        )
+                        model.generate_content,
+                        parts,
+                        generation_config={
+                            "response_mime_type": "application/json",
+                            "temperature": 0.1,
+                            "max_output_tokens": 8192
+                        }
                     ),
-                    timeout=90.0  # 90秒のタイムアウト
+                    timeout=90.0
                 )
                 logger.info(f"[{request_id}] API response received (attempt {attempt + 1})")
                 break
@@ -163,7 +155,7 @@ async def generate_soap(request: SOAPRequest):
                 logger.warning(f"[{request_id}] API timeout (attempt {attempt + 1}/{max_retries})")
                 if attempt == max_retries - 1:
                     raise HTTPException(status_code=504, detail="API timeout - please try again")
-                await asyncio.sleep(2)  # 2秒待機してリトライ
+                await asyncio.sleep(2)
             except Exception as e:
                 if "429" in str(e) or "quota" in str(e).lower():
                     logger.error(f"[{request_id}] Rate limit exceeded: {e}")
@@ -176,22 +168,18 @@ async def generate_soap(request: SOAPRequest):
         if not raw_text:
             raise ValueError("Empty response from API")
         
-        # ⭐ JSON 抽出（より堅牢）
         if raw_text.startswith("```"):
             raw_text = raw_text.split("```")[1]
             if raw_text.startswith("json"):
                 raw_text = raw_text[4:]
             raw_text = raw_text.strip()
         
-        # JSON バリデーション
         result = json.loads(raw_text)
         
-        # ⭐ 必須キーの確認
         required_keys = {"progress", "notice", "s", "oa", "p"}
         missing_keys = required_keys - set(result.keys())
         if missing_keys:
             logger.warning(f"[{request_id}] Missing keys: {missing_keys}")
-            # デフォルト値を補充
             for key in missing_keys:
                 result[key] = ""
         
@@ -216,8 +204,6 @@ async def generate_soap(request: SOAPRequest):
         raise HTTPException(status_code=500, detail=f"Server error: {type(e).__name__}")
 
 def generate_prompt(num_karte: int, num_memo: int, input_text: str) -> str:
-    """複数画像対応のプロンプト生成"""
-    
     prompt = """あなたは理学療法士向けの専門カルテ（SOAP）記録生成AIです。
 提供された画像とテキストを段階的に分析し、以下のJSON形式で必ず返してください。
 
@@ -236,7 +222,7 @@ def generate_prompt(num_karte: int, num_memo: int, input_text: str) -> str:
     prompt += """
 
 【最重要ルール】
-- 「O」と「A」を分けず「oa」キーに統合
+- 「O」と`A`を分けず「oa」キーに統合
 - 複数画像から得られた情報は統合し、矛盾する場合は最新情報を優先
 - 以下の5つのキーのみ返す：progress, notice, s, oa, p
 - Markdown記号やコードブロックは含めない
