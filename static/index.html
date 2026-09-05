@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SOAP Assistant - 臨床記録画像解析</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+    <header class="bg-indigo-600 text-white shadow-md py-4 px-6 flex justify-between items-center">
+        <h1 class="text-xl font-bold tracking-wide">SOAP Assistant</h1>
+        <span class="text-xs bg-indigo-700 px-3 py-1 rounded-full">画像解析特化モード</span>
+    </header>
+
+    <main class="flex-1 max-w-4xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- 入力セクション -->
+        <section class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-4">
+            <h2 class="font-semibold text-lg text-indigo-900 border-b pb-2">入力データ</h2>
+            
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">追加テキスト・メモ（任意）</label>
+                <textarea id="inputText" rows="3" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" placeholder="特記事項や補足情報を入力..."></textarea>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-slate-600 mb-1">カルテ画像 / 申し送り写真</label>
+                <input type="file" id="imageInput" accept="image/*" multiple class="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+            </div>
+
+            <div id="imagePreviewContainer" class="flex flex-wrap gap-2 mt-2"></div>
+
+            <button id="generateBtn" class="mt-auto w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 px-4 rounded-lg transition duration-200 shadow-sm">
+                SOAP記録を生成する
+            </button>
+        </section>
+
+        <!-- 出力セクション -->
+        <section class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-4">
+            <h2 class="font-semibold text-lg text-indigo-900 border-b pb-2">生成結果（SOAP）</h2>
+            
+            <div id="loading" class="hidden flex-1 flex flex-col items-center justify-center text-indigo-600 py-12">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-3"></div>
+                <p class="text-sm">医療文書を高精度で解析して記録を生成中...</p>
+            </div>
+
+            <div id="resultContainer" class="flex flex-col gap-3 text-sm flex-1">
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Progress（経過）</label>
+                    <textarea id="resProgress" rows="4" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-xs"></textarea>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">Notice（注意点）</label>
+                    <input type="text" id="resNotice" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs">
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">S（Subjective）</label>
+                    <input type="text" id="resS" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs">
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">OA（Objective / Assessment 統合）</label>
+                    <textarea id="resOA" rows="6" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono text-xs"></textarea>
+                </div>
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1">P（Plan）</label>
+                    <input type="text" id="resP" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs">
+                </div>
+            </div>
+
+            <button id="copyBtn" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2 px-4 rounded-lg transition duration-200 text-sm border border-slate-300">
+                結果をクリップボードにコピー
+            </button>
+        </section>
+    </main>
+
+    <script>
+        let base64Images = [];
+
+        // 医療文書のOCR精度を高めるため maxWidth を 2200 に設定
+        function compressImageToBase64(file, maxWidth = 2200, quality = 0.85) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > maxWidth) {
+                            height = Math.round((height * maxWidth) / width);
+                            width = maxWidth;
+                        }
+
+                        canvas.width = width;
+                        canvas.height = height;
+
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+                        resolve(compressedDataUrl);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        document.getElementById('imageInput').addEventListener('change', async (e) => {
+            const files = Array.from(e.target.files);
+            base64Images = [];
+            const container = document.getElementById('imagePreviewContainer');
+            container.innerHTML = '';
+
+            for (let file of files) {
+                try {
+                    const compressedBase64 = await compressImageToBase64(file);
+                    base64Images.push(compressedBase64);
+
+                    const img = document.createElement('img');
+                    img.src = compressedBase64;
+                    img.className = 'w-16 h-16 object-cover rounded-lg border border-slate-200';
+                    container.appendChild(img);
+                } catch (err) {
+                    console.error("画像の圧縮に失敗しました:", err);
+                }
+            }
+        });
+
+        document.getElementById('generateBtn').addEventListener('click', async () => {
+            const inputText = document.getElementById('inputText').value;
+            if (!inputText && base64Images.length === 0) {
+                alert('テキストまたは画像を入力してください。');
+                return;
+            }
+
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('resultContainer').classList.add('opacity-50');
+
+            try {
+                const response = await fetch('/api/generate-soap', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        inputText: inputText,
+                        karteImages: base64Images
+                    })
+                });
+
+                if (!response.ok) throw new Error('サーバーエラーが発生しました');
+
+                const data = await response.json();
+                document.getElementById('resProgress').value = data.progress || '';
+                document.getElementById('resNotice').value = data.notice || '';
+                document.getElementById('resS').value = data.s || '';
+                document.getElementById('resOA').value = data.oa || '';
+                document.getElementById('resP').value = data.p || '';
+            } catch (err) {
+                alert(err.message);
+            } finally {
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('resultContainer').classList.remove('opacity-50');
+            }
+        });
+
+        document.getElementById('copyBtn').addEventListener('click', () => {
+            const textToCopy = [
+                `【経過】\n${document.getElementById('resProgress').value}`,
+                `【注意点】\n${document.getElementById('resNotice').value}`,
+                `【S】\n${document.getElementById('resS').value}`,
+                `【OA】\n${document.getElementById('resOA').value}`,
+                `【P】\n${document.getElementById('resP').value}`
+            ].join('\n\n');
+
+            navigator.clipboard.writeText(textToCopy).then(() => {
+                alert('クリップボードにコピーしました！');
+            });
+        });
+    </script>
+</body>
+</html>
