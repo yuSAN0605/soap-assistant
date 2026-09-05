@@ -119,17 +119,16 @@ async def generate_soap(request: SOAPRequest):
             except Exception as e:
                 logger.error(f"  memo image {i} failed: {e}")
         
-        logger.info(f"Calling Gemini API with {len(parts)} parts...")
+        logger.info("Calling Gemini API with gemini-1.5-flash...")
         
-        # gemini-3.5-flash を指定
-        model = genai.GenerativeModel('gemini-3.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = await asyncio.to_thread(
             model.generate_content,
             parts,
             generation_config={
                 "response_mime_type": "application/json",
                 "temperature": 0.1,
-                "max_output_tokens": 4096
+                "max_output_tokens": 8192
             }
         )
         
@@ -139,7 +138,7 @@ async def generate_soap(request: SOAPRequest):
         if not raw_text:
             raise ValueError("Empty response from API")
         
-        # JSON 抽出
+        # JSON抽出
         if raw_text.startswith("```"):
             raw_text = raw_text.split("```")[1]
             if raw_text.startswith("json"):
