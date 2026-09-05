@@ -9,7 +9,8 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from datetime import datetime
 
 logging.basicConfig(
@@ -29,8 +30,7 @@ app.add_middleware(
 )
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -54,8 +54,6 @@ def clean_base64(data_str: str) -> str:
     return data_str
 
 def generate_prompt(num_karte: int, num_memo: int, input_text: str) -> str:
-    """複数画像対応のプロンプト生成"""
-    
     prompt = """あなたは理学療法士向けの専門カルテ（SOAP）記録生成AIです。
 提供された画像とテキストを段階的に分析し、以下のJSON形式で必ず返してください。
 
@@ -63,13 +61,13 @@ def generate_prompt(num_karte: int, num_memo: int, input_text: str) -> str:
     
     if num_karte > 0:
         prompt += f"""
-- カルテ画像（{num_karte}枚）：院内記録、診療録、検査結果として解析
-  各画像から：患者情報、既往歴、体重、検査所見、画像診断を抽出"""
+- カルテ画像（{num_karte}枚）：院内記録、検査結果として解析
+  抽出内容：患者情報、既往歴、体重、検査所見、画像診断"""
     
     if num_memo > 0:
         prompt += f"""
-- メモ画像（{num_memo}枚）：手書きメモ、申し送り、臨床情報として解析
-  各画像から：主訴、症状、動作制限、特記事項を抽出"""
+- メモ画像（{num_memo}枚）：手書きメモ、臨床情報として解析
+  抽出内容：主訴、症状、動作制限、特記事項"""
     
     prompt += """
 
@@ -97,8 +95,8 @@ async def health():
     return {
         "status": "ok",
         "api_key_set": bool(GEMINI_API_KEY),
-        "sdk": "google.generativeai",
-        "model": "gemini-1.5-pro-latest",
+        "sdk": "google-genai",
+        "model": "gemini-3.6-flash",
         "timestamp": datetime.now().isoformat()
     }
 
@@ -107,7 +105,7 @@ async def generate_soap(request: SOAPRequest):
     request_id = datetime.now().strftime("%Y%m%d%H%M%S%f")[:17]
     logger.info(f"[{request_id}] === generate_soap called ===")
     
-    if not GEMINI_API_KEY:
+    if not client:
         logger.error(f"[{request_id}] API key not configured")
         raise HTTPException(status_code=500, detail="API key not configured")
     
@@ -120,7 +118,6 @@ async def generate_soap(request: SOAPRequest):
     if not input_text and not karte_images and not memo_images:
         raise HTTPException(status_code=400, detail="At least one input required")
     
-    # Base64 サイズチェック
     total_size = sum(len(img) for img in karte_images + memo_images)
     if total_size > 50 * 1024 * 1024:
         logger.warning(f"[{request_id}] Total image size exceeds 50MB")
@@ -130,8 +127,7 @@ async def generate_soap(request: SOAPRequest):
     try:
         prompt = generate_prompt(len(karte_images), len(memo_images), input_text)
         
-        # ⭐ 旧SDK のマルチモーダル形式
-        contents = [prompt]
+        contents = [types.Part.from_text(prompt)]
         
         logger.info(f"[{request_id}] Processing {len(karte_images)} karte images...")
         for i, img_b64 in enumerate(karte_images):
@@ -139,15 +135,15 @@ async def generate_soap(request: SOAPRequest):
                 cleaned = clean_base64(img_b64)
                 if cleaned:
                     image_bytes = base64.b64decode(cleaned)
-                    # ⭐ 旧SDK では dict 形式で画像を渡す
-                    contents.append({
-                        "mime_type": "image/jpeg",
-                        "data": image_bytes
-                    })
-                    logger.debug(f"[{request_id}] karte image {i}: {len(image_bytes) / 1024:.1f}KB")
+                    contents.append(
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type="image/jpeg"
+                        )
+                    )
             except Exception as e:
                 logger.error(f"[{request_id}] karte image {i} decode failed: {e}")
-                raise HTTPException(status_code=400, detail=f"Image decode error: {str(e)}")
+                raise HTTPException(status_code=400, detail="Image decode error")
         
         logger.info(f"[{request_id}] Processing {len(memo_images)} memo images...")
         for i, img_b64 in enumerate(memo_images):
@@ -155,32 +151,32 @@ async def generate_soap(request: SOAPRequest):
                 cleaned = clean_base64(img_b64)
                 if cleaned:
                     image_bytes = base64.b64decode(cleaned)
-                    contents.append({
-                        "mime_type": "image/jpeg",
-                        "data": image_bytes
-                    })
-                    logger.debug(f"[{request_id}] memo image {i}: {len(image_bytes) / 1024:.1f}KB")
+                    contents.append(
+                        types.Part.from_bytes(
+                            data=image_bytes,
+                            mime_type="image/jpeg"
+                        )
+                    )
             except Exception as e:
                 logger.error(f"[{request_id}] memo image {i} decode failed: {e}")
-                raise HTTPException(status_code=400, detail=f"Image decode error: {str(e)}")
+                raise HTTPException(status_code=400, detail="Image decode error")
         
-        logger.info(f"[{request_id}] Calling Gemini API (gemini-1.5-pro-latest)...")
+        logger.info(f"[{request_id}] Calling Gemini API (gemini-3.6-flash)...")
         
-        # ⭐ 旧SDK で安定したモデルを使用
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
-        
-        # タイムアウト＆リトライ
         max_retries = 2
+        response = None
+        
         for attempt in range(max_retries):
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
-                        model.generate_content,
-                        contents,
-                        generation_config=genai.types.GenerationConfig(
+                        client.models.generate_content,
+                        model='gemini-3.6-flash',
+                        contents=contents,
+                        config=types.GenerateContentConfig(
                             response_mime_type="application/json",
                             temperature=0.1,
-                            max_output_tokens=4096
+                            max_output_tokens=8192
                         )
                     ),
                     timeout=90.0
@@ -190,21 +186,24 @@ async def generate_soap(request: SOAPRequest):
             except asyncio.TimeoutError:
                 logger.warning(f"[{request_id}] API timeout (attempt {attempt + 1}/{max_retries})")
                 if attempt == max_retries - 1:
-                    raise HTTPException(status_code=504, detail="API timeout - please try again")
+                    raise HTTPException(status_code=504, detail="API timeout")
                 await asyncio.sleep(2)
             except Exception as e:
-                if "429" in str(e):
-                    logger.error(f"[{request_id}] Rate limit: {e}")
+                error_str = str(e)
+                if "429" in error_str or "quota" in error_str.lower():
                     raise HTTPException(status_code=429, detail="API rate limit exceeded")
+                if "404" in error_str or "not found" in error_str.lower():
+                    raise HTTPException(status_code=400, detail="Model not available")
                 raise
         
-        raw_text = response.text.strip() if response and response.text else ""
-        logger.info(f"[{request_id}] API response length: {len(raw_text)}")
+        if not response:
+            raise ValueError("No response from API")
+        
+        raw_text = response.text.strip() if response.text else ""
         
         if not raw_text:
             raise ValueError("Empty response from API")
         
-        # JSON 抽出
         if raw_text.startswith("```"):
             raw_text = raw_text.split("```")[1]
             if raw_text.startswith("json"):
@@ -213,15 +212,11 @@ async def generate_soap(request: SOAPRequest):
         
         result = json.loads(raw_text)
         
-        # 必須キーチェック
         required_keys = {"progress", "notice", "s", "oa", "p"}
         missing_keys = required_keys - set(result.keys())
         if missing_keys:
-            logger.warning(f"[{request_id}] Missing keys: {missing_keys}")
             for key in missing_keys:
                 result[key] = ""
-        
-        logger.info(f"[{request_id}] JSON parsed successfully")
         
         return SOAPResponse(
             progress=result.get("progress", ""),
@@ -233,10 +228,9 @@ async def generate_soap(request: SOAPRequest):
     
     except json.JSONDecodeError as e:
         logger.error(f"[{request_id}] JSON parse error: {e}")
-        logger.error(f"[{request_id}] Raw text: {raw_text[:300]}")
         raise HTTPException(status_code=500, detail="JSON parse error")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"[{request_id}] Error: {type(e).__name__}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Server error: {type(e).__name__}")
+        raise HTTPException(status_code=500, detail=f"Server error")
