@@ -55,34 +55,60 @@ def clean_base64(data_str: str) -> str:
 
 def generate_prompt(num_karte: int, num_memo: int, input_text: str) -> str:
     prompt = """あなたは理学療法士向けの専門カルテ（SOAP）記録生成AIです。
-提供された画像とテキストを段階的に分析し、以下のJSON形式で必ず返してください。
+提供された画像とテキストを分析し、以下のフォーマットとルールを厳守してJSON形式で必ず返してください。
 
-【画像解析の指示】"""
-    
-    if num_karte > 0:
-        prompt += f"""
-- カルテ画像（{num_karte}枚）：院内記録、検査結果として解析
-  抽出内容：患者情報、既往歴、体重、検査所見、画像診断"""
-    
-    if num_memo > 0:
-        prompt += f"""
-- メモ画像（{num_memo}枚）：手書きメモ、臨床情報として解析
-  抽出内容：主訴、症状、動作制限、特記事項"""
-    
-    prompt += """
+【出力フォーマット・記載ルール】
+
+1. progress（経過）：
+- 出力の先頭は必ず以下のテキストから始めてください：
+算定区分：運動器リハビリテーション料(Ⅰ)
+実施区分：2単位
+実施時間：
+実施者：長岡
+本日より理学療法開始
+【現病歴】[現病歴の内容]
+- 画像所見が存在する場合は必ず直前で改行し、以下のように別行で記載してください：
+  【画像所見】
+  X線：[所見内容]（撮影日）
+  MRI：[所見内容]（撮影日）
+- ない場合は【画像所見】の行を出力しないでください。
+
+2. notice（注意点）：
+- 入力情報内に存在する項目のみ「既往歴：」「体重：」「仕事：」の形式で記載してください。ない場合は出力しません。
+
+3. s：
+- 患者自身の言葉のみを抽出してください。必ず鍵カッコ「 」を使用してください。
+
+4. oa（Objective / Assessment統合）：
+以下の項目名と形式で出力してください。測定結果や所見の中で「特記なし」や該当するものがない項目がある場合、「特記なし」や「無記載」などの文字は一切出力せず、項目名の後ろを空欄（値なし）のままにしてください。
+ROM-T:
+MMT:
+Pain・specialtest:
+alignment:
+gait:
+その他：
+（※「その他：」の後に、臨床推論や考察を記載してください）
+
+5. p（Plan）：
+- 理由は一切記載せず、以下の1行のみ（改行せず、スペース区切りの横一列）で出力してください：
+#1 関節可動域訓練 #2 筋力強化訓練 #3 バランス訓練 #4 自主トレーニング指導
 
 【最重要ルール】
-- 「O」と「A」を分けず「oa」キーに統合
-- 複数画像から得られた情報は統合し、矛盾する場合は最新情報を優先
-- 以下の5つのキーのみ返す：progress, notice, s, oa, p
-- Markdown記号やコードブロックは含めない
+- 「O」と「A」を分けず「oa」キーに統合すること
+- 複数画像から得られた情報は統合し、矛盾する場合は最新情報を優先すること
+- 以下の5つのキーのみ返すこと：progress, notice, s, oa, p
+- Markdown記号やコードブロックは含めないこと
 
-【出力形式（必ずこの形）】
+【出力形式（必ずこのJSON構造にすること）】
 {"progress":"...","notice":"...","s":"...","oa":"...","p":"..."}
 """
     
+    if num_karte > 0:
+        prompt += f"\n- カルテ画像（{num_karte}枚）：院内記録、検査結果、画像診断などとして解析"
+    if num_memo > 0:
+        prompt += f"\n- メモ画像（{num_memo}枚）：手書きメモ、臨床情報などとして解析"
     if input_text:
-        prompt += f"\n【追加入力情報】\n{input_text}"
+        prompt += f"\n\n【追加入力情報】\n{input_text}"
     
     return prompt
 
@@ -127,7 +153,6 @@ async def generate_soap(request: SOAPRequest):
     try:
         prompt = generate_prompt(len(karte_images), len(memo_images), input_text)
         
-        # ⭐ text= を指定して修正
         contents = [types.Part.from_text(text=prompt)]
         
         logger.info(f"[{request_id}] Processing {len(karte_images)} karte images...")
