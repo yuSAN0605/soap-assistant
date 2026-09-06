@@ -88,9 +88,14 @@
                 </div>
             </div>
 
-            <button id="copyBtn" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2 px-4 rounded-lg transition duration-200 text-sm border border-slate-300">
-                結果をクリップボードにコピー
-            </button>
+            <div class="flex gap-2">
+                <button id="copyBtn" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2 px-3 rounded-lg transition duration-200 text-sm border border-slate-300">
+                    クリップボードにコピー
+                </button>
+                <button id="downloadTxtBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-3 rounded-lg transition duration-200 text-sm shadow-sm">
+                    📁 メモ帳（.txt）で保存
+                </button>
+            </div>
         </section>
     </main>
 
@@ -122,7 +127,6 @@
         let base64Images = [];
         let stream = null;
 
-        // デバイス判定
         function isMobile() {
             return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
         }
@@ -203,19 +207,15 @@
             updatePreview();
         }
 
-        // 通常の画像ファイル選択
         document.getElementById('imageInput').addEventListener('change', async (e) => {
             await handleFiles(Array.from(e.target.files));
             e.target.value = '';
         });
 
-        // カメラボタンクリック時の分岐処理
         document.getElementById('cameraButton').addEventListener('click', async () => {
             if (isMobile()) {
-                // スマホ：ネイティブカメラ起動
                 document.getElementById('cameraInput').click();
             } else {
-                // PC：WebCamera モーダル起動
                 await openWebcameraModal();
             }
         });
@@ -225,7 +225,6 @@
             e.target.value = '';
         });
 
-        // PC用WebCameraオープン
         async function openWebcameraModal() {
             const modal = document.getElementById('webcameraModal');
             const video = document.getElementById('webcamVideo');
@@ -242,7 +241,6 @@
             }
         }
 
-        // PC用WebCameraクローズ
         function closeWebcameraModal() {
             const modal = document.getElementById('webcameraModal');
             modal.classList.add('hidden');
@@ -253,7 +251,6 @@
             }
         }
 
-        // PCカメラからキャプチャ
         function captureFromWebcamera() {
             const video = document.getElementById('webcamVideo');
             const canvas = document.getElementById('captureCanvas');
@@ -270,7 +267,6 @@
             closeWebcameraModal();
         }
 
-        // SOAP生成ボタン
         document.getElementById('generateBtn').addEventListener('click', async () => {
             const inputText = document.getElementById('inputText').value;
             if (!inputText && base64Images.length === 0) {
@@ -307,7 +303,6 @@
             }
         });
 
-        // クリップボードコピー
         document.getElementById('copyBtn').addEventListener('click', () => {
             const textToCopy = [
                 `【経過】\n${document.getElementById('resProgress').value}`,
@@ -320,6 +315,48 @@
             navigator.clipboard.writeText(textToCopy).then(() => {
                 alert('クリップボードにコピーしました！');
             });
+        });
+
+        // 改善版テキストファイル（メモ帳）ダウンロード機能
+        document.getElementById('downloadTxtBtn').addEventListener('click', () => {
+            try {
+                const textContent = [
+                    `【経過】`,
+                    document.getElementById('resProgress').value,
+                    `\n【注意点】`,
+                    document.getElementById('resNotice').value,
+                    `\n【S】`,
+                    document.getElementById('resS').value,
+                    `\n【OA】`,
+                    document.getElementById('resOA').value,
+                    `\n【P】`,
+                    document.getElementById('resP').value
+                ].join('\n');
+                
+                if (!textContent.trim()) {
+                    alert('保存する内容がありません。');
+                    return;
+                }
+
+                const blob = new Blob([textContent], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                
+                const now = new Date();
+                const timestamp = now.toISOString().slice(0, 19).replace(/:/g, '');
+                link.download = `SOAP_${timestamp}.txt`;
+                link.href = url;
+                
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                alert('✅ ダウンロード完了');
+            } catch (err) {
+                alert('❌ ダウンロードに失敗しました');
+                console.error(err);
+            }
         });
     </script>
 </body>
