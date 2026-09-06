@@ -88,12 +88,9 @@
                 </div>
             </div>
 
-            <div class="flex gap-2">
-                <button id="copyBtn" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium py-2 px-3 rounded-lg transition duration-200 text-sm border border-slate-300">
-                    クリップボードにコピー
-                </button>
-                <button id="downloadTxtBtn" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 px-3 rounded-lg transition duration-200 text-sm shadow-sm">
-                    📁 メモ帳（.txt）で保存
+            <div>
+                <button id="downloadTxtBtn" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 px-3 rounded-lg transition duration-200 text-sm shadow-sm">
+                    📁 テキストで保存
                 </button>
             </div>
         </section>
@@ -303,22 +300,7 @@
             }
         });
 
-        // クリップボードコピー（【経過】の見出しを削除）
-        document.getElementById('copyBtn').addEventListener('click', () => {
-            const textToCopy = [
-                document.getElementById('resProgress').value,
-                `【注意点】\n${document.getElementById('resNotice').value}`,
-                `【S】\n${document.getElementById('resS').value}`,
-                `【OA】\n${document.getElementById('resOA').value}`,
-                `【P】\n${document.getElementById('resP').value}`
-            ].join('\n\n');
-
-            navigator.clipboard.writeText(textToCopy).then(() => {
-                alert('クリップボードにコピーしました！');
-            });
-        });
-
-        // テキストファイル（メモ帳）ダウンロード機能（【経過】の見出しを削除）
+        // テキストファイルダウンロード機能
         document.getElementById('downloadTxtBtn').addEventListener('click', () => {
             try {
                 const textContent = [
