@@ -303,9 +303,10 @@
             }
         });
 
+        // クリップボードコピー（【経過】の見出しを削除）
         document.getElementById('copyBtn').addEventListener('click', () => {
             const textToCopy = [
-                `【経過】\n${document.getElementById('resProgress').value}`,
+                document.getElementById('resProgress').value,
                 `【注意点】\n${document.getElementById('resNotice').value}`,
                 `【S】\n${document.getElementById('resS').value}`,
                 `【OA】\n${document.getElementById('resOA').value}`,
@@ -317,11 +318,10 @@
             });
         });
 
-        // 改善版テキストファイル（メモ帳）ダウンロード機能
+        // テキストファイル（メモ帳）ダウンロード機能（【経過】の見出しを削除）
         document.getElementById('downloadTxtBtn').addEventListener('click', () => {
             try {
                 const textContent = [
-                    `【経過】`,
                     document.getElementById('resProgress').value,
                     `\n【注意点】`,
                     document.getElementById('resNotice').value,
